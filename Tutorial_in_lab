@@ -1,0 +1,103 @@
+===== Gene family Expansion-Contraction analysis Tutorial =====
+
+** Reference ** \\
+[[https://hahnlab.github.io/CAFE/src_docs/html/index.html|CAFE manual]]\\
+[[http://evomicsorg.wpengine.netdna-cdn.com/wp-content/uploads/2016/06/cafe_tutorial-1.pdf|CAFE tutorial]]
+----
+** 1. Make Gene family **\\
+Need to ready Gene family data across a set of species, which are going to be an input dataset of Gene Family analysis.\\
+\\
+1. All-by-all blast\\
+	a. Moving all longest isoforms into a single file
+	Keep all but the longest isoforms, place all sequences from all species into a single .fa file
+		
+	$ python python_scripts/cafetutorial_longest_iso.py -d twelve_spp_proteins /
+	$ cat twelve_spp_proteins/longest*.fa > makeblastdb_input.fa
+	
+	b. makeblastdb
+	$ makeblastdb -in makeblastdb_input.fa -dbtype prot -out blastdb
+	
+	c. blast
+	$ blastp -num_threads 4 -db blast.db -query makeblastdb_input.fa -outfmt 7 -seg yes > blast_output.txt
+
+2. clustering \\
+	Run following commands to make clustering results and make proper CAFE format.
+	$ grep -v "#" blast_output.txt | cut -f 1 ,2 ,11 > blast_output.abc
+	$ mcxload -abc blast_output.abc --stream -mirror --stream -neg -log10 -stream 
+		\ -tf ’ceil (200)’ -o blast_output.mci -write -tab blast_output.tab
+	$ mcl blast_output.mci -I 3
+	$ mcxdump -icl out.blast_output.mci.I30 -tabr blast_output.tab -o dump.blast_output.mci.I30
+\\
+** 2. Run CAFE **\\
+1. Convert clustered gene family data into CAFE input format 
+Check here for example: ''/mss1/projects/PSG_SKKU/GF_analysis/SMALL_TREES/Bpl_lineage/1.input/''\\
+\\
+	a. Summarize gene family information into count values
+	$ python ../../../program/python_scripts/cafetutorial_mcl2rawcafe.py -i ../../../Construct_GF/Bpl_blast/dump.blast_output.mci.I30 -o spc2.unfiltered -sp "Bparan -"
+	
+	b. Filter gene family
+	$ python ../../../program/python_scripts/cafetutorial_clade_and_size_filter.py  -i ./spc2.unfiltered -o spc2.filtered_input.txt -s
+	
+	c. Additional filtering: Using only gene families conatining genes from every species.
+	(Filtering gene family that has no gene from at least one species)
+	$ grep -v 0 spc2.filtered_input.txt > spc2.filtered.allcontain_input.txt
+2. Run CAFE \\
+**Prepare runCafe.sh file**\\
+For initial run\\
+	#! cafe
+	load -i  spc2.filtered.allcontain_input.txt  -filter -t 32 -l ./init.log
+	tree (Bpa:1.08106,Bpl:1.08106)
+	lambda -s -t (1,1);
+	report init.report
+
+For secondary run (with estiamted lambda)\\
+	#! cafe
+	load -i  spc2.filtered.allcontain_input.txt  -filter -t 32 -l ./lambdaup.log
+	tree (Bpa:1.08106,Bpl:1.08106)
+	lambda -l 0.07141536297768 -t (1,1);
+	report lambdaup.report
+\\
+2.1. Run CAFE without lambda\\
+Estimate lambda during running CAFE
+	$ cafe.v4  ./runCafe.sh
+2.2. Run CAFE with estimated lambda\\
+	$ cafe.v4  ./runCafe2.sh
+\\
+**Warnings!**\\
+- species id in the tree(nwk) should be consistent with input gene family information\\
+- runCafe.sh file should be in the format strictly, additional spaces or rows below can make segmentation faults\\
+- Need enough memory or threads to run the program normally\\
+- It can print segmentation faults without any reason or error, then try to run the program several times\\
+\\
+3. Make summary of CAFE results with CAFE innated scripts\\
+	$ python_scripts/cafetutorial_report_analysis.py -i ../2.runCAFE/spc2_all/lambdaup.report.cafe -r 0 -o spc2_all
+4. Draw tree plot with expansion/contraction counts\\
+-d parameter can be found in .cafe file result of **step 2**\\
+This innate script produce single .png format tree figure with the annotation of contraction/expansion/rapidly evolving gene family counts  \\
+	==> cmd_contraction <==
+	$ python cafetutorial_draw_tree.py -i ../3.summary/spc2_all_node.txt -t '(Bpa:1.08106,Bpl:1.08106)' -d '(Bpa<0>,Bpl<2>)<1>' -o spc2.Contractions.png -y Contractions
+	
+	==> cmd_expansion <==
+	$ python cafetutorial_draw_tree.py -i ../3.summary/spc2_all_node.txt -t '(Bpa:1.08106,Bpl:1.08106)' -d '(Bpa<0>,Bpl<2>)<1>' -o spc2.Expansions.png -y Expansions
+	
+	==> cmd_rapid <==
+	$ python cafetutorial_draw_tree.py -i ../3.summary/spc2_all_node.txt -t '(Bpa:1.08106,Bpl:1.08106)' -d '(Bpa<0>,Bpl<2>)<1>' -o spc2.Rapid.png -y Rapid
+\\
+** 3. Make manual Summary **\\
+There are several scripts for making manual summary of results or gene family.
+	==> cmd_cnt <==
+	Counts of expansion, contractions on each nodes of trees, node ids are identical with .cafe file and -d parameters above.
+	$ perl script/find_family_CorE.pl ../3.summary/spc2_all_fams.txt > ECcnts.spc2.txt
+	
+	==> cmd_GFI <==
+	Make up gene family information into clear form 
+	$ perl script/match_family_genes.pl /mss1/projects/PSG_SKKU/GF_analysis/Construct_GF/Bpl_blast/dump.blast_output.mci.I30 ../1.input/spc2.filtered.allcontain_input.txt > spc2_GFI.txt
+	
+	==> cmd_summary <==
+	Summay of gene family counts and gene counts of gene family
+	$ perl script/summary_TF.pl ../1.input/spc2.filtered.allcontain_input.txt > summary_all_spc2
+\\
+** 4. Additional tips for drawing figures **\\
+Use [[https://itol.embl.de/|iTOL]] !
+- iTOL has an annotation function to combine specific labels or additional plots on visualised phylogenetic tree
+- Innate visual summarizing script make only splitted figures for each events (expansions and contractions)
